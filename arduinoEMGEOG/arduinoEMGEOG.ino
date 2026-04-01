@@ -15,20 +15,18 @@ void setup() {
   pinMode(A2, INPUT);
   pinMode(A3, INPUT);
   pinMode(A4, INPUT);
-  //Want a sampling rate of 1000 samples/s
-  //Each sample is 11 bytes including the newline character
-  //That gives us a bitrate of 88 *1000 bits/s
-  Serial.begin(88000);
+  Serial.begin(115200);
   Serial.setTimeout(1);
 }
 
 void loop() {
+  int startTime = micros();
   // put your main code here, to run repeatedly:
-  int val0 = 200;//analogRead(A0)
-  int val1 = 300;//analogRead(A1)
-  int val2 = 400;//;analogRead(A2)
-  int val3 = 500;//analogRead(A3)
-  int val4 = 600;//analogRead(A4)
+  int val0 = random(200,299);//analogRead(A0)
+  int val1 = random(300,399);//analogRead(A1)
+  int val2 = random(400,499);//;analogRead(A2)
+  int val3 = random(500,599);//analogRead(A3)
+  int val4 = random(600,699);//analogRead(A4)
   //Serial.println(Serial.availableForWrite());
   if(Serial.availableForWrite() > 11){
     int buf[] = {val0, val1, val2, val3, val4};
@@ -37,4 +35,7 @@ void loop() {
     Serial.write(p, 10);
     Serial.write('\n');
   }
+  //Enforces 1000 Hz sampling rate
+  //1000 microseconds in one second
+  delayMicroseconds(1000-(micros()-startTime));
 }
