@@ -37,37 +37,41 @@ fig.canvas.blit(fig.bbox)
 
 def preprocess(samples):
     # First two values are EMG, last three values are EOG
-    arr = np.array(samples)
+    emg = np.array(samples)[:,0:2]
+    eog = np.array(samples)[:,2:5]
     # Band Pass EOG and EMG
     
     # Notch Filter EMG
     
-    return arr
+    return emg,eog
 
 def classify(features):
+    
     return 1
 
 # ── async pipeline ───────────────────────────────────────────────
 async def main():
     print("I'm in main")
-    ser = serial.Serial('COM7', 115200, timeout=0)
+    ser = serial.Serial('COM7', 115200, timeout=0.1)
 
     async def read():
         readStartTime = time.time()
         while True:
             if ser.in_waiting:
                 try:
-                    data = ser.readline()
+                    data = ser.read(size=11)
+                    #splitData = data.strip().split(",")
                     splitData = [data[i:i+2] for i in range(0,10,2)]
+                    #print(splitData)
                     intData = [0.0] * 5
                     for i in range(5):
                         # Turn ints into voltage values
+                        #intData[i] = (int(splitData[i])/ADC_STEPS) * V_REF
                         intData[i] = (int.from_bytes(splitData[i], "little")/ADC_STEPS) * V_REF
                     #await asyncio.sleep(0.0004)
                     #intData = [-2,-1,0,1,2]
                     buf.append(intData)
                     tstamps.append(time.time()-readStartTime)
-                    #print(intData)
                 except Exception as e:
                     print(e)
                     pass

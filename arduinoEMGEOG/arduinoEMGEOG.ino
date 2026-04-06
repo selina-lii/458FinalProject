@@ -32,8 +32,17 @@ void loop() {
     int buf[] = {val0, val1, val2, val3, val4};
     //Serial.println(sizeof(buf));
     byte *p = reinterpret_cast<byte*>(buf);
-    Serial.write(p, 10);
-    Serial.write('\n');
+    Serial.write(p,10);
+    //Serial.print(val0);
+    //Serial.print(",");
+    //Serial.print(val1);
+    //Serial.print(",");
+    //Serial.print(val2);
+    //Serial.print(",");
+    //Serial.print(val3);
+    //Serial.print(",");
+    //Serial.print(val4);
+    Serial.print("\n");
   }
   //Enforces 1000 Hz sampling rate
   //1000 microseconds in one second
