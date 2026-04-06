@@ -22,11 +22,11 @@ void setup() {
 void loop() {
   int startTime = micros();
   // put your main code here, to run repeatedly:
-  int val0 = random(200,299);//analogRead(A0)
-  int val1 = random(300,399);//analogRead(A1)
-  int val2 = random(400,499);//;analogRead(A2)
-  int val3 = random(500,599);//analogRead(A3)
-  int val4 = random(600,699);//analogRead(A4)
+  int val0 = random(0,100);//analogRead(A0)
+  int val1 = random(0,100);//analogRead(A1)
+  int val2 = random(0,100);//;analogRead(A2)
+  int val3 = random(0,100);//analogRead(A3)
+  int val4 = random(0,100);//analogRead(A4)
   //Serial.println(Serial.availableForWrite());
   if(Serial.availableForWrite() > 11){
     int buf[] = {val0, val1, val2, val3, val4};

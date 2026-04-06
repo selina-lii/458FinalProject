@@ -17,7 +17,7 @@ buf = []
 tstamps = []
 
 x_len = 3000
-y_range = [-5,5]
+y_range = [0,5]
 x_range = [0,2]
 
 fig,ax = plt.subplots()
@@ -80,6 +80,7 @@ async def main():
     async def process():
         global tstamps, buf
         timeToSleep = WINDOW
+        stopPlotting = False
         while True:
             await asyncio.sleep(timeToSleep)
             print("Slept for", timeToSleep)
@@ -87,8 +88,31 @@ async def main():
             if buf:
                 snap, buf = buf, []
                 print("data period=", tstamps[-1]-tstamps[0])
-                tstamps = []
                 print(f"n={len(snap)}, result={classify(preprocess(snap))}, compute time={time.time()-startTime}")
+                if not stopPlotting:
+                    # Plotting part
+                    data_sample = np.array(snap[-x_len:],ndmin=2)
+                    for i in range(np.shape(data_sample)[1]):
+                        data_sample[:,i] = data_sample[:,i] + i
+                    t_sample = tstamps[-x_len:]
+    
+                    #nanPoints = np.zeros((x_len - numPoints,5))*np.nan
+                    #ys = np.concatenate((data_sample,nanPoints),0)
+    
+                    fig.canvas.restore_region(bg)
+                    for l in range(len(line)):
+                        line[l].set_ydata(data_sample[:,l])
+                        line[l].set_xdata(t_sample)
+                        ax.set_xlim([t_sample[0],t_sample[0]+2])
+                        #print(np.shape(ys[:,l]))
+                        ax.draw_artist(line[l])
+                        #print("succeeded")
+                    fig.canvas.blit(fig.bbox)
+                    fig.canvas.flush_events()
+                    # Stops plotting
+                    if not plt.fignum_exists(fig.number):
+                        stopPlotting = True
+                tstamps = []
             timeToSleep = WINDOW - (time.time()-startTime)
             
     async def plot():
@@ -123,7 +147,7 @@ async def main():
                 if not plt.fignum_exists(fig.number):
                     stopPlotting = True
             await asyncio.sleep(0)
-    await asyncio.gather(read(), process(), plot())
+    await asyncio.gather(read(), process())
 
 print("Started Running")
 asyncio.run(main())
