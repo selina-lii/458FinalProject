@@ -41,8 +41,8 @@ void loop() {
     int buf[] = {val0, val1, val2};
     //Serial.println(sizeof(buf));
     byte *p = reinterpret_cast<byte*>(buf);
-    //Serial.write(p,6);
-    //Serial.print("\n");
+    Serial.write(p,6);
+    Serial.print("\n");
   }
   if(Serial.available()){
     byte b = Serial.read();

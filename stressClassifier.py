@@ -3,9 +3,10 @@ import numpy as np
 import matplotlib.style as mplstyle
 import matplotlib.pyplot as plt
 import random
+import csv
 from scipy.signal import butter, filtfilt
 
-WINDOW = 2
+WINDOW = 5
 V_REF = 5.0
 R_BITS = 10
 ADC_STEPS = (2**R_BITS) - 1
@@ -19,9 +20,9 @@ buf = []
 # Specific timestamps of each data point for accurate graphing and rate calculations
 tstamps = []
 
-x_len = 3000
-y_range = [0,5]
-x_range = [0,2]
+x_len = WINDOW * 1000
+y_range = [0,6]
+x_range = [0,WINDOW]
 
 fig,ax = plt.subplots()
 xs = range(x_len)
@@ -44,10 +45,25 @@ def plateau(dat,threshold=1):
    transitions = np.diff(above.astype(int))
    n_events = np.sum(transitions == 1)
    idx = np.where(transitions != 0)[0] + 1
-   durations = np.diff(np.concatenate(([0], idx, [len(above)])))
-   max_dur = np.max(durations)
-   avg_dur = np.mean(durations)
-   return n_events, max_dur, avg_dur
+   
+   transitionIndices = np.nonzero(transitions)
+   print(np.shape(transitionIndices))
+   if not np.shape(transitionIndices)[1] == 0:
+       transitionIndices = transitionIndices[1]
+   else:
+       return above,0,[]
+   print(transitionIndices)
+   if transitionIndices.shape[0] % 2 == 1:
+       np.append(transitionIndices,np.shape(transitions)[1])
+   #durations = transitionIndices[1::2] - transitionIndices[::2]
+   amplitudes = np.zeros(np.shape(transitionIndices[1::2]))
+   amplitudeIndices = np.zeros(np.shape(transitionIndices[1::2]))
+   for i,(end,start) in enumerate(zip(transitionIndices[1::2],transitionIndices[::2])):
+       amplitudes[i]=np.max(dat[0,start:end])
+       amplitudeIndices[i]=np.argmax(dat[0,start:end])
+   longShort = amplitudes > .5
+   print(longShort)
+   return above, n_events, longShort, amplitudeIndices
 
 
 def peaks(dat,fold=1):
@@ -93,61 +109,62 @@ def preprocess_emg(emg):
 
 def classify_emg(roll_rms):
    # Jaw Clench: Larger RMS = stress
-   n_events, max_dur, avg_dur= plateau(roll_rms*5,2)
+   #_, n_events, max_dur, avg_dur= plateau(roll_rms*5,2)
+   n_events = 0
+   max_dur = 0
+   avg_dur = 0
    rate = n_events/WINDOW
    return rate, max_dur, avg_dur
 
 
 def preprocess_eog(eog):
    eog = np.array(eog)
-   # Blink rate
-   b, a = butter(4, [2,10], btype='bandpass', fs=FS)
-   eog_filt = filtfilt(b, a, np.transpose(eog))
-   blinks = peaks(eog_filt)
-
+   ## Blink rate
+   #b, a = butter(4, [2,10], btype='bandpass', fs=FS)
+   #eog_filt = filtfilt(b, a, np.transpose(eog))
 
    # Saccades
-   b, a = butter(2, [0.25,7.5], btype='band', fs=FS)
+   b, a = butter(4, [2,10], btype='band', fs=FS)
    eog_filt = filtfilt(b, a, np.transpose(eog))
+   blinks = peaks(eog_filt)
    # saccades = drift(eog_filt)
 
 
-   return blinks
+   return eog_filt * -20
 
 def classify_eog(blinks):
    # Count of blinks: High blink rate = low alertness
-   n_events, max_dur, avg_dur= plateau(blinks,1)
+   rect, n_events, longShort, amplitudeIndices = plateau(blinks,0.2)
    rate = n_events/WINDOW
-   return rate, max_dur, avg_dur
+   return rect, rate, longShort
 
 
 def classify(eog, emg):
    alertness = True
    stress = False
-   blink_rate, max_blink_dur, avg_blink_dur = classify_eog(eog)
+   rect, blink_rate, longShort = classify_eog(eog)
    n_clenches, max_clench_dur, avg_clench_dur = classify_emg(emg)
    HIGH_BLINK_RATE = 5
    LOW_BLINK_RATE = 0
-   LONG_BLINK = 1
    LONG_CLENCH = 1.5
    MANY_CLENCHES = 2
-   print(blink_rate)
-   print(max_blink_dur)
-   print(avg_blink_dur)
-   print(n_clenches)
+   #print(blink_rate)
+   #print(max_blink_dur)
+   #print(avg_blink_dur)
+   #print(n_clenches)
    # (High blink rate OR Prolonged blink) AND (No clench)
    if (blink_rate>=HIGH_BLINK_RATE \
-       or max_blink_dur>=LONG_BLINK)\
+       or True)\
        and not (n_clenches>MANY_CLENCHES):
        alertness = False
    if (max_clench_dur>LONG_CLENCH or n_clenches>MANY_CLENCHES) or (blink_rate<=LOW_BLINK_RATE):
        stress = True
   
-   return stress, alertness
+   return rect, stress, alertness
   
 def preprocess(samples):
-   emg = np.array(samples)[:,0:2]
-   eog = np.array(samples)[:,2:5]
+   emg = np.array(samples)[:,0]
+   eog = np.array(samples)[:,1:2]
    eog = preprocess_eog(eog)
    emg = preprocess_emg(emg)
    return eog, emg
@@ -159,26 +176,29 @@ async def main():
 
     async def read():
         readStartTime = time.time()
-        while True:
-            if ser.in_waiting:
-                try:
-                    data = ser.read(size=7)
-                    #splitData = data.strip().split(",")
-                    splitData = [data[i:i+2] for i in range(0,6,2)]
-                    #print(splitData)
-                    intData = [0.0] * 3
-                    for i in range(3):
-                        # Turn ints into voltage values
-                        #intData[i] = (int(splitData[i])/ADC_STEPS) * V_REF
-                        intData[i] = (int.from_bytes(splitData[i], "little")/ADC_STEPS) * V_REF
-                    #await asyncio.sleep(0.0004)
-                    #intData = [-2,-1,0,1,2]
-                    buf.append(intData)
-                    tstamps.append(time.time()-readStartTime)
-                except Exception as e:
-                    print(e)
-                    pass
-                await asyncio.sleep(0)
+        with open("testingData.csv", "a") as f:
+            writer = csv.writer(f)
+            while True:
+                if ser.in_waiting:
+                    try:
+                        data = ser.read(size=7)
+                        #splitData = data.strip().split(",")
+                        splitData = [data[i:i+2] for i in range(0,6,2)]
+                        #print(splitData)
+                        intData = [0.0] * 3
+                        for i in range(3):
+                            # Turn ints into voltage values
+                            #intData[i] = (int(splitData[i])/ADC_STEPS) * V_REF
+                            intData[i] = (int.from_bytes(splitData[i], "little")/ADC_STEPS) * V_REF
+                        #await asyncio.sleep(0.0004)
+                        #intData = [-2,-1,0,1,2]
+                        buf.append(intData)
+                        tstamps.append(time.time()-readStartTime)
+                        writer.writerow(intData)
+                    except Exception as e:
+                        print(e)
+                        pass
+                    await asyncio.sleep(0)
 
     async def process():
         global tstamps, buf
@@ -192,18 +212,24 @@ async def main():
                 snap, buf = buf, []
                 print("data period=", tstamps[-1]-tstamps[0])
                 processedEOG, processedEMG = preprocess(snap)
-                stressed, alert = classify(processedEOG, processedEMG)
+                rect, stressed, alert = classify(processedEOG, processedEMG)
                 print(f"n={len(snap)}, stressed?={stressed}, alert?={alert},compute time={time.time()-startTime}")
                 if stressed:
-                    ser.write(b'\x07')
+                    #ser.write(b'\x07')
+                    pass
                 if not alert:
-                    ser.write(b'\x08')
+                    #ser.write(b'\x08')
+                    pass
                 if not stopPlotting:
                     # Plotting part
                     data_sample = np.array(snap[-x_len:],ndmin=2)
                     for i in range(np.shape(data_sample)[1]):
                         data_sample[:,i] = data_sample[:,i] + i
                     t_sample = tstamps[-x_len:]
+                    #print(np.shape(data_sample))
+                    #print(np.shape(processedEOG))
+                    #data_sample = np.hstack([np.transpose(processedEOG),np.transpose(rect)])
+                    #t_sample = tstamps[-x_len:]
     
                     #nanPoints = np.zeros((x_len - numPoints,5))*np.nan
                     #ys = np.concatenate((data_sample,nanPoints),0)
@@ -212,7 +238,7 @@ async def main():
                     for l in range(len(line)):
                         line[l].set_ydata(data_sample[:,l])
                         line[l].set_xdata(t_sample)
-                        ax.set_xlim([t_sample[0],t_sample[0]+2])
+                        ax.set_xlim([t_sample[0],t_sample[0]+WINDOW])
                         #print(np.shape(ys[:,l]))
                         ax.draw_artist(line[l])
                         #print("succeeded")
