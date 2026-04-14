@@ -21,7 +21,7 @@ buf = []
 tstamps = []
 
 x_len = WINDOW * 1000
-y_range = [0,6]
+y_range = [0,5]
 x_range = [0,WINDOW]
 
 fig,ax = plt.subplots()
@@ -39,7 +39,7 @@ for l in line:
     ax.draw_artist(l)
 fig.canvas.blit(fig.bbox)
 
-def plateau(dat,threshold=1):
+def plateau(dat,threshold=1,isEOG=False):
    # Returns duration of plateaus
    above = dat >= threshold
    transitions = np.diff(above.astype(int))
@@ -49,20 +49,31 @@ def plateau(dat,threshold=1):
    transitionIndices = np.nonzero(transitions)
    print(np.shape(transitionIndices))
    if not np.shape(transitionIndices)[1] == 0:
-       transitionIndices = transitionIndices[1]
+       if isEOG:
+          transitionIndices = transitionIndices[1]
+       else:
+          transitionIndices = transitionIndices[0]
    else:
-       return above,0,[]
+       return above,0,[],[]
    print(transitionIndices)
-   if transitionIndices.shape[0] % 2 == 1:
-       np.append(transitionIndices,np.shape(transitions)[1])
-   #durations = transitionIndices[1::2] - transitionIndices[::2]
+   if isEOG:
+       if transitionIndices.shape[0] % 2 == 1:
+          np.append(transitionIndices,np.shape(transitions)[1])
    amplitudes = np.zeros(np.shape(transitionIndices[1::2]))
    amplitudeIndices = np.zeros(np.shape(transitionIndices[1::2]))
    for i,(end,start) in enumerate(zip(transitionIndices[1::2],transitionIndices[::2])):
-       amplitudes[i]=np.max(dat[0,start:end])
-       amplitudeIndices[i]=np.argmax(dat[0,start:end])
-   longShort = amplitudes > .5
-   print(longShort)
+       if isEOG:
+          amplitudes[i]=np.max(dat[0,start:end])
+          amplitudeIndices[i]=np.argmax(dat[0,start:end])
+       else:
+          amplitudes[i]=np.max(dat[start:end])
+          amplitudeIndices[i]=np.argmax(dat[start:end])
+   if isEOG:
+       longShort = amplitudes > .5
+       n_events = np.sum(longShort)
+   else:
+       durations = transitionIndices[1::2] - transitionIndices[::2]
+       longShort = durations > 500
    return above, n_events, longShort, amplitudeIndices
 
 
@@ -83,17 +94,19 @@ def drift(dat, window):
 def rms_power(dat):
    # RMS of rectified EMG (RMS(∑|EMG|) - average muscle activation level
    b, a = butter(5, [70, 240], btype='bandpass', fs=FS)
-   filt = filtfilt(b, a, np.transpose(dat))
-   def rolling_rms(signal, window):
+   emgfilt = filtfilt(b, a, np.transpose(dat))
+   t = np.linspace(0,WINDOW,WINDOW*FS)
+   def rolling_rms(signal, t, window):
        rms = [np.sqrt(np.mean(signal[i:i+window]**2)) for i in range(len(signal)-window+1)]
-       return np.array(rms)
-   rms=rolling_rms(filt,100)
-   return rms
+       t_center = t[window//2 : window//2 + len(rms)]
+       return np.array(t_center), np.array(rms)
+   t_RMS, RMS=rolling_rms(emgfilt,t,100)
+   return t_RMS, RMS
 
 
 def preprocess_emg(emg):
-   power = rms_power(emg)
-   return power
+   t, power = rms_power(emg)
+   return t, power*10
 
 
 #def simulate_emg(duration=10):
@@ -109,12 +122,8 @@ def preprocess_emg(emg):
 
 def classify_emg(roll_rms):
    # Jaw Clench: Larger RMS = stress
-   #_, n_events, max_dur, avg_dur= plateau(roll_rms*5,2)
-   n_events = 0
-   max_dur = 0
-   avg_dur = 0
-   rate = n_events/WINDOW
-   return rate, max_dur, avg_dur
+   above, n_events, longShort, _ = plateau(roll_rms,0.1,False)
+   return np.sum(longShort) > 0
 
 
 def preprocess_eog(eog):
@@ -134,31 +143,38 @@ def preprocess_eog(eog):
 
 def classify_eog(blinks):
    # Count of blinks: High blink rate = low alertness
-   rect, n_events, longShort, amplitudeIndices = plateau(blinks,0.2)
+   rect, n_events, longShort, amplitudeIndices = plateau(blinks,0.2,True)
    rate = n_events/WINDOW
    return rect, rate, longShort
 
 
 def classify(eog, emg):
    alertness = True
-   stress = False
-   rect, blink_rate, longShort = classify_eog(eog)
-   n_clenches, max_clench_dur, avg_clench_dur = classify_emg(emg)
-   HIGH_BLINK_RATE = 5
-   LOW_BLINK_RATE = 0
-   LONG_CLENCH = 1.5
-   MANY_CLENCHES = 2
+   rect, blink_rate, isLong = classify_eog(eog)
+   if not np.shape(isLong)[0] == 0:
+      sequentialShort = ~np.array(isLong[:-1]) & ~np.array(isLong[1:])
+   else:
+      sequentialShort = []
+   if sum(sequentialShort) > 0:
+       alertness = False
+   elif blink_rate <= 1:
+       alertness = True
+   stress = classify_emg(emg)
+#    HIGH_BLINK_RATE = 5
+#    LOW_BLINK_RATE = 0
+#    LONG_CLENCH = 1.5
+#    MANY_CLENCHES = 2
    #print(blink_rate)
    #print(max_blink_dur)
    #print(avg_blink_dur)
    #print(n_clenches)
    # (High blink rate OR Prolonged blink) AND (No clench)
-   if (blink_rate>=HIGH_BLINK_RATE \
-       or True)\
-       and not (n_clenches>MANY_CLENCHES):
-       alertness = False
-   if (max_clench_dur>LONG_CLENCH or n_clenches>MANY_CLENCHES) or (blink_rate<=LOW_BLINK_RATE):
-       stress = True
+#    if (blink_rate>=HIGH_BLINK_RATE \
+#        or True)\
+#        and not (n_clenches>MANY_CLENCHES):
+#        alertness = False
+#    if (max_clench_dur>LONG_CLENCH or n_clenches>MANY_CLENCHES) or (blink_rate<=LOW_BLINK_RATE):
+#        stress = True
   
    return rect, stress, alertness
   
@@ -166,8 +182,8 @@ def preprocess(samples):
    emg = np.array(samples)[:,0]
    eog = np.array(samples)[:,1:2]
    eog = preprocess_eog(eog)
-   emg = preprocess_emg(emg)
-   return eog, emg
+   emg_t, emg = preprocess_emg(emg)
+   return eog, emg, emg_t
 
 # ── async pipeline ───────────────────────────────────────────────
 async def main():
@@ -211,14 +227,14 @@ async def main():
             if buf:
                 snap, buf = buf, []
                 print("data period=", tstamps[-1]-tstamps[0])
-                processedEOG, processedEMG = preprocess(snap)
+                processedEOG, processedEMG, emg_t = preprocess(snap)
                 rect, stressed, alert = classify(processedEOG, processedEMG)
                 print(f"n={len(snap)}, stressed?={stressed}, alert?={alert},compute time={time.time()-startTime}")
                 if stressed:
-                    #ser.write(b'\x07')
+                    ser.write(b'\x07')
                     pass
                 if not alert:
-                    #ser.write(b'\x08')
+                    ser.write(b'\x08')
                     pass
                 if not stopPlotting:
                     # Plotting part
@@ -226,8 +242,10 @@ async def main():
                     for i in range(np.shape(data_sample)[1]):
                         data_sample[:,i] = data_sample[:,i] + i
                     t_sample = tstamps[-x_len:]
-                    #print(np.shape(data_sample))
-                    #print(np.shape(processedEOG))
+
+                    #data_sample= processedEMG * 10
+                    #t_sample = np.arange(np.shape(processedEMG)[0]) / FS
+                    
                     #data_sample = np.hstack([np.transpose(processedEOG),np.transpose(rect)])
                     #t_sample = tstamps[-x_len:]
     
@@ -237,6 +255,7 @@ async def main():
                     fig.canvas.restore_region(bg)
                     for l in range(len(line)):
                         line[l].set_ydata(data_sample[:,l])
+                        #line[l].set_ydata(data_sample)
                         line[l].set_xdata(t_sample)
                         ax.set_xlim([t_sample[0],t_sample[0]+WINDOW])
                         #print(np.shape(ys[:,l]))

@@ -46,17 +46,16 @@ void loop() {
   }
   if(Serial.available()){
     byte b = Serial.read();
+    buzzStartTime = millis();
     if(b == byte{7} && !mode){
       //Stressed = b07
       mode = 7;
-      buzzStartTime = millis();
       digitalWrite(buzzer,HIGH);
       delay(1);
       //Serial.println("Saw 7");
     }else if(b == byte{8} && !mode){
       //Not alert = b08
       mode = 8;
-      buzzStartTime = millis();
       beepCount = 1;
       isBuzzing = true;
       digitalWrite(buzzer,HIGH);
@@ -64,13 +63,14 @@ void loop() {
       //Serial.println("Saw 8");
     }
   }
+  timer = millis()-buzzStartTime;
   //1 second tone
-  if(mode == 7 && millis()-buzzStartTime >= 1000){
+  if(mode == 7 && timer >= 1000){
     digitalWrite(buzzer,LOW);
     mode = 0;
     //Serial.println("Turn Off");
   //three 0.5 second tones
-  }else if(mode == 8 && millis()-buzzStartTime >= 100){
+  }else if(mode == 8 && timer >= 100){
     if(isBuzzing){
       digitalWrite(buzzer,LOW);
     }else{
