@@ -63,7 +63,7 @@ void loop() {
       //Serial.println("Saw 8");
     }
   }
-  timer = millis()-buzzStartTime;
+  int timer = millis()-buzzStartTime;
   //1 second tone
   if(mode == 7 && timer >= 1000){
     digitalWrite(buzzer,LOW);
